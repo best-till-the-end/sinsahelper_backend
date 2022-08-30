@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -15,9 +15,8 @@ jobs:
       uses: actions/checkout@v3
       
     - name: Setup Java JDK
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v1
       with:
-        distribution: temurin # check
         java-version: 11
         
     - name: Setup Gradle
@@ -25,15 +24,26 @@ jobs:
       
     - name: Execute Gradle build
       run: ./gradlew clean build --exclude-task test
-      
-    - name: Login to DockerHub
-      uses: docker/login-action@v2
+             
+    - name: Docker build
+      run: |
+          sudo docker login -u ${{ secrets.DOCKERHUB_USERNAME }} -p ${{ secrets.DOCKERHUB_PASSWORD }}
+          sudo docker build -t ${{ secrets.PROJECT_NAME }} .
+          sudo docker tag ${{ secrets.PROJECT_NAME }} ${{ secrets.DOCKER_HUB_REPO }}:${GITHUB_SHA::7}
+          sudo docker push ${{ secrets.DOCKER_HUB_REPO }}:${GITHUB_SHA::7}
+          
+    - name: Deploy
+      uses: appleboy/ssh-action@master
       with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_PASSWORD }}
- 
-    - name: build image
-      run: docker build -t squib0612/sinsahelper-backend:latest .
-      
-    - name: push image to hub
-      run: docker push squib0612/sinsahelper-backend:latest
+        host: ${{ secrets.EC2_HOST }}
+        username: ubuntu
+        key: ${{ secrets.PRIVATE_KEY }}
+        envs: GITHUB_SHA
+        script: |
+            sudo docker pull ${{ secrets.DOCKER_HUB_REPO }}:${GITHUB_SHA::7}
+            sudo docker tag ${{ secrets.DOCKER_HUB_REPO }}:${GITHUB_SHA::7} ${{ secrets.PROJECT_NAME }}
+            sudo docker stop ${{ secrets.PROJECT_NAME }}
+            sudo docker rm ${{ secrets.PROJECT_NAME }}
+            sudo docker run -d --name ${{secrets.PROJECT_NAME }} -p 80:8080 ${{ secrets.PROJECT_NAME }}
+            sudo docker image prune -f
+    
